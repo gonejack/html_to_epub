@@ -1,0 +1,18 @@
+[package]
+name = "html_to_epub"
+license = "MIT"
+version = "0.1.1"
+edition = "2018"
+description = "A command line converts .html file to .epub file."
+authors = ["John <igonejack@gmail.com>"]
+repository = "https://github.com/gonejack/html_to_epub"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4.14"
+env_logger = "0.9.0"
+getopts = "0.2.21"
+epub-builder = "0.4.8"
+visdom = "0.4.11"
