@@ -2,7 +2,6 @@ use std::{env, fs};
 use std::error::Error;
 use std::fs::File;
 use std::io;
-use std::ops::Add;
 use std::path::Path;
 use std::time::Duration;
 
@@ -88,19 +87,15 @@ impl<'a> HtmlToEpub<'a> {
         return xhtml.to_owned();
     }
 
-    fn save_images(&self, doc: &Elements) {
+    fn save_images(&mut self, doc: &Elements) {
         let mut dls: Vec<(String, String)> = Vec::new();
 
-        doc.find("img").each(|_i, e| {
+        doc.find("img").each(|i, e| {
             if let Some(src) = e.get_attribute("src") {
-                fs::create_dir_all("media").unwrap();
-                let mut save = format!("./media/{}", _i);
-                if let Some(extension) = Path::new(&src.to_string()).extension() {
-                    let ext = extension.to_str().unwrap();
-                    if !ext.starts_with(".") {
-                        save = save.add(".")
-                    }
-                    save = save.add(ext);
+                fs::create_dir_all("image").unwrap();
+                let mut save = format!("image/{}", i);
+                if let Some(ext) = Path::new(&src.to_string()).extension() {
+                    save = format!("{}.{}", save, ext.to_str().unwrap());
                 }
                 e.set_attribute("src", Option::Some(&save));
                 dls.push((src.to_string(), save));
@@ -109,6 +104,14 @@ impl<'a> HtmlToEpub<'a> {
         });
 
         self.download_urls(dls);
+
+        doc.find("img").each(|_i, e| {
+            if let Some(src) = e.get_attribute("src") {
+                let path = src.to_string();
+                self.epub.add_resource(&path, fs::File::open(&path).unwrap(), "image/jpeg").unwrap();
+            }
+            true
+        });
     }
 
     fn download_urls(&self, mut urls: Vec<(String, String)>) {
@@ -136,7 +139,7 @@ impl<'a> HtmlToEpub<'a> {
     }
 
     async fn do_get(url: &str) -> Result<Response, reqwest::Error> {
-        let mut builder = reqwest::Client::builder();
+        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
         if let Ok(http_proxy) = env::var("http_proxy") {
             builder = builder.proxy(reqwest::Proxy::all(http_proxy)?);
         }
