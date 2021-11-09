@@ -1,7 +1,7 @@
 [package]
 name = "html_to_epub"
 license = "MIT"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2018"
 description = "A command line converts .html file to .epub file."
 authors = ["John <igonejack@gmail.com>"]
