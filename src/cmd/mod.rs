@@ -1,9 +1,17 @@
-use std::fs;
+use std::{env, fs};
+use std::error::Error;
 use std::fs::File;
+use std::io;
+use std::ops::Add;
+use std::path::Path;
+use std::time::Duration;
 
 use epub_builder::{EpubBuilder, EpubContent, ReferenceType};
 use epub_builder::ZipLibrary;
+use futures::executor::block_on;
+use futures::future;
 use log::info;
+use reqwest::Response;
 use visdom::types::Elements;
 use visdom::Vis;
 
@@ -34,7 +42,6 @@ impl<'a> HtmlToEpub<'a> {
 
         for (i, html) in self.html.iter().enumerate() {
             info!("process {}", html);
-
             self.add_html(&format!("section{}.xhtml", i), html)?;
         }
 
@@ -49,10 +56,6 @@ impl<'a> HtmlToEpub<'a> {
         self.epub.metadata("author", self.option.author)?;
         self.epub.metadata("title", self.option.title)?;
         self.epub.add_cover_image("cover.png", self.option.cover, "image/png")?;
-        self.epub.add_content(EpubContent::new("cover.xhtml", "".as_bytes())
-            .title("Cover")
-            .reftype(ReferenceType::Cover))?;
-
         Ok(())
     }
 
@@ -60,6 +63,9 @@ impl<'a> HtmlToEpub<'a> {
         let data = fs::read_to_string(html)?;
 
         let doc = Vis::load(&data)?;
+
+        self.save_images(&doc);
+
         let title_node = doc.find("title");
         let title = title_node.text();
         let body = Self::gen_xhtml(doc);
@@ -81,4 +87,64 @@ impl<'a> HtmlToEpub<'a> {
 
         return xhtml.to_owned();
     }
+
+    fn save_images(&self, doc: &Elements) {
+        let mut dls: Vec<(String, String)> = Vec::new();
+
+        doc.find("img").each(|_i, e| {
+            if let Some(src) = e.get_attribute("src") {
+                fs::create_dir_all("media").unwrap();
+                let mut save = format!("./media/{}", _i);
+                if let Some(extension) = Path::new(&src.to_string()).extension() {
+                    let ext = extension.to_str().unwrap();
+                    if !ext.starts_with(".") {
+                        save = save.add(".")
+                    }
+                    save = save.add(ext);
+                }
+                e.set_attribute("src", Option::Some(&save));
+                dls.push((src.to_string(), save));
+            }
+            true
+        });
+
+        self.download_urls(dls);
+    }
+
+    fn download_urls(&self, mut urls: Vec<(String, String)>) {
+        while !urls.is_empty() {
+            let mut list = Vec::new();
+            for _ in 0..3 {
+                if urls.is_empty() {
+                    break;
+                }
+                let (url, save) = urls.remove(0);
+                info!("saving {} as {}", url, save);
+                list.push(Self::download(url, save));
+            }
+            block_on(future::join_all(list));
+        }
+    }
+
+    async fn download(url: String, target: String) -> Result<(), Box<dyn Error>> {
+        if let Ok(mut fd) = File::create(target) {
+            let resp = Self::do_get(&url).await?;
+            let bytes = resp.bytes().await?;
+            io::copy(&mut bytes.as_ref(), &mut fd)?;
+        }
+        Ok(())
+    }
+
+    async fn do_get(url: &str) -> Result<Response, reqwest::Error> {
+        let mut builder = reqwest::Client::builder();
+        if let Ok(http_proxy) = env::var("http_proxy") {
+            builder = builder.proxy(reqwest::Proxy::all(http_proxy)?);
+        }
+        builder.build()?.get(url)
+            .header("user-agent", USER_AGENT)
+            .timeout(Duration::new(120, 0))
+            .send().await
+    }
 }
+
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:93.0) Gecko/20100101 Firefox/93.0";

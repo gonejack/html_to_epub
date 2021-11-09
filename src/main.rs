@@ -6,7 +6,8 @@ use log::{error, LevelFilter};
 use html_to_epub::cmd::HtmlToEpub;
 use html_to_epub::cmd::HtmlToEpubOption;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::builder().filter_level(LevelFilter::Info).init();
 
     let mut opts = Options::new();

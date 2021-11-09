@@ -16,3 +16,7 @@ env_logger = "0.9.0"
 getopts = "0.2.21"
 epub-builder = "0.4.8"
 visdom = "0.4.11"
+futures = "0.3"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+md5="0.7.0"
