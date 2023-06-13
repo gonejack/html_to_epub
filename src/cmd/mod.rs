@@ -58,10 +58,10 @@ impl<'a> HtmlToEpub<'a> {
         Ok(())
     }
 
-    fn add_html(&mut self, name: &str, html: &str) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    fn add_html(&mut self, name: &str, html: &str) -> Result<(), Box<dyn Error + 'static>> {
         let data = fs::read_to_string(html)?;
 
-        let doc = Vis::load(&data)?;
+        let doc = Vis::load(&data).unwrap();
 
         self.save_images(&doc);
 

@@ -1,7 +1,7 @@
 [package]
 name = "html_to_epub"
 license = "MIT"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2018"
 description = "A command line converts .html file to .epub file."
 authors = ["John <igonejack@gmail.com>"]
@@ -12,10 +12,10 @@ readme = "README.md"
 
 [dependencies]
 log = "0.4.14"
-env_logger = "0.9.0"
+env_logger = "0.10.0"
 getopts = "0.2.21"
-epub-builder = "0.4.8"
-visdom = "0.4.11"
+epub-builder = "0.5.0"
+visdom = { version = "0.5.10", features = ["full"] }
 futures = "0.3"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
