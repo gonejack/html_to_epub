@@ -11,11 +11,11 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4.14"
-env_logger = "0.10.0"
-getopts = "0.2.21"
-epub-builder = "0.5.0"
-visdom = { version = "0.5.10", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
+getopts = "0.2"
+epub-builder = "0.5"
+visdom = { version = "0.5", features = ["full"] }
 futures = "0.3"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
