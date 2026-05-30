@@ -1,16 +1,14 @@
-use std::{env, fs};
 use std::error::Error;
 use std::fs::File;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
+use std::{env, fs};
 
-use epub_builder::{EpubBuilder, EpubContent, ReferenceType};
 use epub_builder::ZipLibrary;
-use futures::executor::block_on;
-use futures::future;
-use log::info;
+use epub_builder::{EpubBuilder, EpubContent, ReferenceType};
 use reqwest::Response;
+use tracing::info;
 use visdom::types::Elements;
 use visdom::Vis;
 
@@ -24,7 +22,7 @@ pub struct HtmlToEpubOption<'a> {
 pub struct HtmlToEpub<'a> {
     html: &'a Vec<String>,
     option: HtmlToEpubOption<'a>,
-    epub: EpubBuilder<ZipLibrary>,
+    epub: Option<EpubBuilder<ZipLibrary>>,
 }
 
 impl<'a> HtmlToEpub<'a> {
@@ -32,38 +30,37 @@ impl<'a> HtmlToEpub<'a> {
         Self {
             html,
             option,
-            epub: EpubBuilder::new(ZipLibrary::new().unwrap()).unwrap(),
+            epub: Some(EpubBuilder::new(ZipLibrary::new().unwrap()).unwrap()),
         }
     }
 
-    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn Error + 'static>> {
         self.make_book()?;
 
         for (i, html) in self.html.iter().enumerate() {
             info!("process {}", html);
-            self.add_html(&format!("section{}.xhtml", i), html)?;
+            self.add_html(&format!("section{}.xhtml", i), html).await?;
         }
 
         let mut output = File::create(self.option.output)?;
-
-        self.epub.generate(&mut output)?;
+        self.epub.take().unwrap().generate(&mut output)?;
 
         Ok(())
     }
 
     fn make_book(&mut self) -> epub_builder::Result<()> {
-        self.epub.metadata("author", self.option.author)?;
-        self.epub.metadata("title", self.option.title)?;
-        self.epub.add_cover_image("cover.png", self.option.cover, "image/png")?;
+        let epub = self.epub.as_mut().unwrap();
+        epub.metadata("author", self.option.author)?;
+        epub.metadata("title", self.option.title)?;
+        epub.add_cover_image("cover.png", self.option.cover, "image/png")?;
         Ok(())
     }
 
-    fn add_html(&mut self, name: &str, html: &str) -> Result<(), Box<dyn Error + 'static>> {
+    async fn add_html(&mut self, name: &str, html: &str) -> Result<(), Box<dyn Error + 'static>> {
         let data = fs::read_to_string(html)?;
-
         let doc = Vis::load(&data).unwrap();
 
-        self.save_images(&doc);
+        self.save_images(&doc).await;
 
         let title_node = doc.find("title");
         let title = title_node.text();
@@ -72,7 +69,7 @@ impl<'a> HtmlToEpub<'a> {
             .title(title)
             .reftype(ReferenceType::Text);
 
-        self.epub.add_content(content)?;
+        self.epub.as_mut().unwrap().add_content(content)?;
 
         Ok(())
     }
@@ -80,14 +77,12 @@ impl<'a> HtmlToEpub<'a> {
     fn gen_xhtml(doc: Elements) -> String {
         doc.find("html").set_attr("xmlns", Option::from("http://www.w3.org/1999/xhtml"));
 
-        let xhtml = r#"<?xml version="1.0" encoding="UTF-8"?>
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-"#.to_string() + &doc.outer_html();
-
-        return xhtml.to_owned();
+"#.to_string() + &doc.outer_html()
     }
 
-    fn save_images(&mut self, doc: &Elements) {
+    async fn save_images(&mut self, doc: &Elements<'_>) {
         let mut dls: Vec<(String, String)> = Vec::new();
 
         doc.find("img").each(|i, e| {
@@ -103,51 +98,44 @@ impl<'a> HtmlToEpub<'a> {
             true
         });
 
-        self.download_urls(dls);
+        let tasks: Vec<_> = dls.into_iter().map(|(url, save)| {
+            info!("saving {} as {}", url, save);
+            tokio::spawn(download(url, save))
+        }).collect();
+        for task in tasks {
+            let _ = task.await;
+        }
 
         doc.find("img").each(|_i, e| {
             if let Some(src) = e.get_attribute("src") {
                 let path = src.to_string();
-                self.epub.add_resource(&path, fs::File::open(&path).unwrap(), "image/jpeg").unwrap();
+                self.epub.as_mut().unwrap()
+                    .add_resource(&path, fs::File::open(&path).unwrap(), "image/jpeg")
+                    .unwrap();
             }
             true
         });
     }
+}
 
-    fn download_urls(&self, mut urls: Vec<(String, String)>) {
-        while !urls.is_empty() {
-            let mut list = Vec::new();
-            for _ in 0..3 {
-                if urls.is_empty() {
-                    break;
-                }
-                let (url, save) = urls.remove(0);
-                info!("saving {} as {}", url, save);
-                list.push(Self::download(url, save));
-            }
-            block_on(future::join_all(list));
-        }
+async fn download(url: String, target: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Ok(mut fd) = File::create(target) {
+        let resp = do_get(&url).await?;
+        let bytes = resp.bytes().await?;
+        io::copy(&mut bytes.as_ref(), &mut fd)?;
     }
+    Ok(())
+}
 
-    async fn download(url: String, target: String) -> Result<(), Box<dyn Error>> {
-        if let Ok(mut fd) = File::create(target) {
-            let resp = Self::do_get(&url).await?;
-            let bytes = resp.bytes().await?;
-            io::copy(&mut bytes.as_ref(), &mut fd)?;
-        }
-        Ok(())
+async fn do_get(url: &str) -> Result<Response, reqwest::Error> {
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
+    if let Ok(http_proxy) = env::var("http_proxy") {
+        builder = builder.proxy(reqwest::Proxy::all(http_proxy)?);
     }
-
-    async fn do_get(url: &str) -> Result<Response, reqwest::Error> {
-        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
-        if let Ok(http_proxy) = env::var("http_proxy") {
-            builder = builder.proxy(reqwest::Proxy::all(http_proxy)?);
-        }
-        builder.build()?.get(url)
-            .header("user-agent", USER_AGENT)
-            .timeout(Duration::new(120, 0))
-            .send().await
-    }
+    builder.build()?.get(url)
+        .header("user-agent", USER_AGENT)
+        .timeout(Duration::new(120, 0))
+        .send().await
 }
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:93.0) Gecko/20100101 Firefox/93.0";
