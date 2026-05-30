@@ -3,3 +3,4 @@
 /image
 *.html
 *.epub
+.DS_STORE
