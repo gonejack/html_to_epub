@@ -105,10 +105,13 @@ async fn main() {
         return;
     }
 
-    let mut cover = include_bytes!("cover.png").to_vec();
-    if let Some(cover_path) = args.cover {
-        cover = fs::read(cover_path).unwrap();
-    }
+    let cover = match args.cover {
+        Some(ref p) => fs::read(p).unwrap_or_else(|e| {
+            error!(target: "argument", "Failed to read cover image '{}': {}", p, e);
+            std::process::exit(1);
+        }),
+        None => include_bytes!("cover.png").to_vec(),
+    };
 
     let opt = HtmlToEpubOption {
         cover: &cover,
